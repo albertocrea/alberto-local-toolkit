@@ -23,19 +23,28 @@ for tool in "$TOOLKIT_BIN"/*; do
     echo "   ✅ $tool_name instalado en $BIN_DIR"
 done
 
-# 3. Añadir a PATH en ~/.zshrc si no está presente
+# 3. Añadir bin al PATH en ~/.zshrc si no está presente
 ZSHRC="$HOME/.zshrc"
 PATH_EXPORT="export PATH=\"\$HOME/bin:\$PATH\""
 
 if ! grep -q "$PATH_EXPORT" "$ZSHRC"; then
     echo "🔗 Añadiendo ~/bin al PATH en $ZSHRC..."
-    # Añadir con un comentario para identificarlo
-    echo "\n# Antigravity local-toolkit path" >> "$ZSHRC"
+    echo -e "\n# Antigravity local-toolkit path" >> "$ZSHRC"
     echo "$PATH_EXPORT" >> "$ZSHRC"
-    echo "✅ PATH configurado. Reinicia tu terminal o ejecuta 'source ~/.zshrc'."
+fi
+
+# 4. Enlazar configuraciones de shell personalizadas
+SHELL_CONFIG_SOURCE="source \"$(pwd)/shell/custom_aliases.zsh\""
+
+if ! grep -q "custom_aliases.zsh" "$ZSHRC"; then
+    echo "🔗 Enlazando configuraciones de shell en $ZSHRC..."
+    echo -e "\n# Antigravity local-toolkit custom aliases" >> "$ZSHRC"
+    echo "$SHELL_CONFIG_SOURCE" >> "$ZSHRC"
+    echo "✅ Configuraciones de shell enlazadas."
 else
-    echo "ℹ️ El PATH ya está configurado en $ZSHRC."
+    echo "ℹ️ Las configuraciones de shell ya están enlazadas en $ZSHRC."
 fi
 
 echo "\n✨ Instalación completada con éxito."
 echo "Puedes probar el comando escribiendo: dictado"
+echo "O usar tus nuevos alias tras ejecutar: source ~/.zshrc"
