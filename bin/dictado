@@ -5,8 +5,13 @@ import signal
 import sys
 import time
 
+# Ajuste de PATH para encontrar herramientas de Homebrew y Python
+os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + os.environ.get("PATH", "")
+
 TEMP_AUDIO = "/tmp/dictado_audio.wav"
 PID_FILE = "/tmp/dictado.pid"
+FFMPEG_PATH = "/opt/homebrew/bin/ffmpeg"
+WHISPER_PATH = "/Users/albertoestevez/Library/Python/3.9/bin/mlx_whisper"
 
 def get_running_pid():
     if os.path.exists(PID_FILE):
@@ -17,36 +22,6 @@ def get_running_pid():
             return None
     return None
 
-def start_recording():
-    # Creamos el comando de grabación en segundo plano
-    # -i :default para el micrófono de macOS
-    proc = subprocess.Popen([
-        "ffmpeg", "-y", "-f", "avfoundation", "-i", ":default", 
-        "-t", "600", # Límite de 10 min
-        TEMP_AUDIO
-    ], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-    
-    with open(PID_FILE, "w") as f:
-        f.write(str(proc.pid))
-    
-    subprocess.run(["osascript", "-e", 'display notification "🎙️ Grabando... Pulsa de nuevo para transcribir" with title "Dictado Whisper"'])
-    print(f"🎙️ Grabando (PID: {proc.pid})...")
-
-def stop_recording(pid):
-    print(f"⏹️ Deteniendo grabación (PID: {pid})...")
-    try:
-        os.kill(pid, signal.SIGINT) # Enviamos una interrupción elegante para que ffmpeg cierre el archivo bien
-        # Esperamos un poco a que el proceso termine
-        for _ in range(10):
-            if not is_pid_running(pid):
-                break
-            time.sleep(0.2)
-    except ProcessLookupError:
-        pass
-    
-    if os.path.exists(PID_FILE):
-        os.remove(PID_FILE)
-
 def is_pid_running(pid):
     try:
         os.kill(pid, 0)
@@ -54,55 +29,86 @@ def is_pid_running(pid):
         return False
     return True
 
-def transcribe_and_paste():
-    if not os.path.exists(TEMP_AUDIO) or os.path.getsize(TEMP_AUDIO) < 5000:
-        subprocess.run(["osascript", "-e", 'display notification "⚠️ Grabación demasiado corta o vacía" with title "Dictado Whisper"'])
+def start_recording():
+    # Usamos start_new_session=True para que ffmpeg siga vivo aunque el atajo termine
+    # Redirigimos outputs a DEVNULL para evitar bloqueos por buffer lleno
+    proc = subprocess.Popen([
+        FFMPEG_PATH, "-y", "-f", "avfoundation", "-i", ":default", 
+        "-t", "600", # Límite de 10 min
+        TEMP_AUDIO
+    ], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, start_new_session=True)
+    
+    with open(PID_FILE, "w") as f:
+        f.write(str(proc.pid))
+    
+    subprocess.run(["osascript", "-e", 'display notification "🎙️ Grabando... Pulsa de nuevo para transcribir" with title "Dictado Whisper"'])
+
+def stop_recording(pid):
+    try:
+        # Enviamos SIGINT para que ffmpeg guarde el archivo WAV correctamente
+        os.kill(pid, signal.SIGINT)
+        # Pequeña espera para que el proceso termine de escribir a disco
+        for _ in range(10):
+            if not is_pid_running(pid):
+                break
+            time.sleep(0.2)
+    except:
+        pass
+    
+    if os.path.exists(PID_FILE):
+        os.remove(PID_FILE)
+
+def transcribe_and_copy():
+    # El archivo debe existir y tener un tamaño mínimo razonable (~10KB)
+    if not os.path.exists(TEMP_AUDIO) or os.path.getsize(TEMP_AUDIO) < 10000:
+        subprocess.run(["osascript", "-e", 'display notification "⚠️ Audio no capturado correctamente" with title "Dictado Whisper"'])
         return
 
     subprocess.run(["osascript", "-e", 'display notification "🤖 Transcribiendo..." with title "Dictado Whisper"'])
     
     try:
-        # Usamos el path completo del repo en el MLX Community (usará tu caché de 3GB)
+        # Capturamos la salida de Whisper
         result = subprocess.run([
-            "mlx_whisper", TEMP_AUDIO, 
+            WHISPER_PATH, TEMP_AUDIO, 
             "--model", "mlx-community/whisper-large-v3-mlx", 
             "--language", "es"
         ], capture_output=True, text=True)
         
-        raw_text = result.stdout.strip()
-        if not raw_text:
-            subprocess.run(["osascript", "-e", 'display notification "❌ No se pudo extraer texto" with title "Dictado Whisper"'])
-            return
+        raw_output = result.stdout.strip()
+        
+        # FILTRO: Whisper imprime configuración antes del texto real.
+        # El texto real siempre viene después de una marca de tiempo estilo [00:00 -> 00:05]
+        actual_text = []
+        for line in raw_output.split("\n"):
+            # Buscamos líneas que contengan marcas de tiempo reales
+            if "->" in line and "]" in line:
+                content = line.split("]")[-1].strip()
+                if content:
+                    actual_text.append(content)
+        
+        final_message = " ".join(actual_text)
 
-        # Limpiar timestamps [00:00 -> 00:05]
-        clean_lines = []
-        for line in raw_text.split("\n"):
-            if "]" in line:
-                clean_lines.append(line.split("]")[-1].strip())
-            elif line.strip():
-                clean_lines.append(line.strip())
-        
-        final_text = " ".join(clean_lines) if clean_lines else raw_text
-
-        # Copiar y Pegar
-        process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
-        process.communicate(input=final_text.encode('utf-8'))
-        
-        time.sleep(0.5)
-        subprocess.run(["osascript", "-e", 'tell application "System Events" to keystroke "v" using {command down}'])
-        subprocess.run(["osascript", "-e", 'display notification "✅ Texto pegado" with title "Dictado Whisper"'])
-        
+        if final_message:
+            # Copiar al portapapeles
+            process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+            process.communicate(input=final_message.encode('utf-8'))
+            subprocess.run(["osascript", "-e", 'display notification "📋 Texto copiado con éxito" with title "Dictado Whisper"'])
+        else:
+            # Si el filtro falló pero hay salida, mostramos el error para depurar
+            subprocess.run(["osascript", "-e", 'display notification "❌ No se detectó texto en el audio" with title "Dictado Whisper"'])
+            
     except Exception as e:
-        print(f"Error: {e}")
-        subprocess.run(["osascript", "-e", f'display notification "❌ Error: {str(e)}" with title "Dictado Whisper"'])
+        subprocess.run(["osascript", "-e", f'display notification "Error: {str(e)}" with title "Dictado Whisper"'])
 
 if __name__ == "__main__":
-    pid = get_running_pid()
-    
-    if pid and is_pid_running(pid):
-        stop_recording(pid)
-        transcribe_and_paste()
-        if os.path.exists(TEMP_AUDIO):
-            os.remove(TEMP_AUDIO)
-    else:
-        start_recording()
+    try:
+        pid = get_running_pid()
+        if pid and is_pid_running(pid):
+            stop_recording(pid)
+            transcribe_and_copy()
+            if os.path.exists(TEMP_AUDIO):
+                os.remove(TEMP_AUDIO)
+        else:
+            start_recording()
+    except Exception as e:
+        subprocess.run(["osascript", "-e", f'display notification "{str(e)}" with title "❌ Error Fatídico"'])

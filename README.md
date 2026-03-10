@@ -12,10 +12,14 @@ Este repositorio contiene mi conjunto de herramientas personales portables, dise
 ## 🛠️ Herramientas Disponibles
 
 ### 🎙️ dictado (`bin/dictado`)
-Permite grabar audio desde el micrófono, transcribirlo automáticamente usando `mlx_whisper` e insertarlo en la aplicación activa en ese momento.
+Permite grabar audio desde el micrófono, transcribirlo automáticamente usando `mlx_whisper` e introducirlo en el portapapeles para pegarlo donde gustes.
 
 - **Tecnología**: usa `ffmpeg` para la captura y `whisper-large-v3-mlx` para la transcripción.
-- **Uso**: ejecuta el comando, habla y el texto aparecerá donde tengas el cursor.
+- **Uso**: 
+    1. Pulsa tu atajo de teclado para empezar a grabar.
+    2. Pulsa de nuevo para detener y transcribir.
+    3. Una notificación te avisará cuando el texto esté en el portapapeles.
+    4. Pulsa `Cmd + V` para pegar.
 
 ## 🚀 Instalación en un Mac Nuevo
 
